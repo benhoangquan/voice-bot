@@ -123,4 +123,9 @@ async def main():
             logger.exception(f"Bot execution failed: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    while True:
+        try:
+            asyncio.run(main())
+        except Exception as e:
+            logger.exception(f"Main loop failed: {e}")
+            time.sleep(1)
