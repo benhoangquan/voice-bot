@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.frames.frames import EndFrame
+from pipecat.frames.frames import EndFrame, TextFrame, StartFrame
 from pipecat.processors.aggregators.llm_response import (
     LLMUserContextAggregator,
     LLMAssistantContextAggregator
@@ -210,4 +210,23 @@ class VoiceBot:
         task = PipelineTask(pipeline)
         runner = PipelineRunner()
         
+        # Send an initial greeting after pipeline starts
+        # This helps trigger the conversation and lets the user know the bot is ready
+        async def send_greeting():
+            await asyncio.sleep(1.5)  # Give pipeline time to fully initialize and start audio capture
+            try:
+                # Add a greeting message to the context and trigger LLM response
+                greeting_text = "Hello! How can I help you today?"
+                # Push text frame into the user context aggregator to trigger LLM
+                greeting_frame = TextFrame(text=greeting_text)
+                await user_context.process_frame(greeting_frame, "downstream")
+                print(f"[VOICE] Sent initial greeting: {greeting_text}")
+            except Exception as e:
+                print(f"[VOICE] Error sending greeting: {e}")
+        
+        # Start the greeting in background
+        asyncio.create_task(send_greeting())
+        
+        print("[VOICE] Starting pipeline runner...")
         await runner.run(task)
+        print("[VOICE] Pipeline runner finished")
