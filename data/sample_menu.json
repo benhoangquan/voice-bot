@@ -1,0 +1,76 @@
+{
+  "items": [
+    {
+      "name": "Grilled Salmon",
+      "description": "Fresh Atlantic salmon with lemon butter sauce, served with seasonal vegetables and rice",
+      "price": 28.99,
+      "category": "Main Course",
+      "dietary": ["gluten-free", "pescatarian"],
+      "allergens": ["fish"],
+      "available": true
+    },
+    {
+      "name": "Ribeye Steak",
+      "description": "12oz prime ribeye, cooked to perfection, served with garlic mashed potatoes and asparagus",
+      "price": 34.99,
+      "category": "Main Course",
+      "dietary": [],
+      "allergens": [],
+      "available": true
+    },
+    {
+      "name": "Caesar Salad",
+      "description": "Crisp romaine lettuce with parmesan cheese, croutons, and house-made Caesar dressing",
+      "price": 12.99,
+      "category": "Salad",
+      "dietary": ["vegetarian"],
+      "allergens": ["dairy", "gluten"],
+      "available": true
+    },
+    {
+      "name": "Margherita Pizza",
+      "description": "Classic pizza with fresh mozzarella, tomato sauce, and basil",
+      "price": 16.99,
+      "category": "Pizza",
+      "dietary": ["vegetarian"],
+      "allergens": ["dairy", "gluten"],
+      "available": true
+    },
+    {
+      "name": "Chocolate Lava Cake",
+      "description": "Warm chocolate cake with molten center, served with vanilla ice cream",
+      "price": 9.99,
+      "category": "Dessert",
+      "dietary": ["vegetarian"],
+      "allergens": ["dairy", "eggs", "gluten"],
+      "available": true
+    },
+    {
+      "name": "Vegetarian Pasta",
+      "description": "Fresh pasta with seasonal vegetables, olive oil, and herbs",
+      "price": 18.99,
+      "category": "Main Course",
+      "dietary": ["vegetarian", "vegan"],
+      "allergens": ["gluten"],
+      "available": true
+    },
+    {
+      "name": "Chicken Parmesan",
+      "description": "Breaded chicken breast with marinara sauce and mozzarella, served with pasta",
+      "price": 22.99,
+      "category": "Main Course",
+      "dietary": [],
+      "allergens": ["dairy", "eggs", "gluten"],
+      "available": true
+    },
+    {
+      "name": "Tiramisu",
+      "description": "Classic Italian dessert with coffee-soaked ladyfingers and mascarpone",
+      "price": 8.99,
+      "category": "Dessert",
+      "dietary": ["vegetarian"],
+      "allergens": ["dairy", "eggs", "gluten"],
+      "available": true
+    }
+  ]
+}
