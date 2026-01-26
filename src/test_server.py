@@ -181,7 +181,7 @@ def get_or_create_bot(session_id: str) -> VoiceBot:
         
         # Create voice bot instance
         bot = VoiceBot(
-            telephony_adapter=mock_telephony,
+            transport=mock_telephony,
             stt_adapter=stt_adapter,
             tts_adapter=tts_adapter,
             llm_adapter=llm_adapter,
