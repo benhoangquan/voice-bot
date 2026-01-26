@@ -17,24 +17,11 @@ from pipecat.services.anthropic import AnthropicLLMService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 
-# Context Management
-from pipecat.processors.frame_processor import FrameProcessor
-# --- FIXED IMPORTS ---
-# 1. Aggregators (Logic that adds messages to history)
-from pipecat.processors.aggregators.llm_response import (
-    LLMUserContextAggregator,
-    LLMAssistantContextAggregator
-)
-
-# 2. Context (The actual history object)
-# Moved from 'pipecat.services.llm' to here:
+# Context & Processors
 from pipecat.processors.aggregators.llm_context import LLMContext 
-
-# 3. Processors
 from pipecat.processors.frame_processor import FrameProcessor
-# ---------------------
 
-# Your custom adapters (assumed to exist)
+# Custom adapters
 from ..adapters.base import STTAdapter, TTSAdapter, LLMAdapter, CalendarAdapter, TelephonyAdapter
 from ..rag.menu_rag import MenuRAG
 from ..guardrails.safety import Guardrails
@@ -48,7 +35,7 @@ class VoiceBot:
 
     def __init__(
         self,
-        transport,  # Transport is passed in (e.g., DailyTransport, TwilioTransport)
+        transport,
         stt_adapter: STTAdapter,
         tts_adapter: TTSAdapter,
         llm_adapter: LLMAdapter,
@@ -67,7 +54,7 @@ class VoiceBot:
         self.call_sid = call_sid
         self.caller_id = caller_id
         
-        # 1. Initialize Context with System Prompt
+        # 1. Initialize Context
         self.context = LLMContext(
             messages=[
                 {
@@ -77,71 +64,119 @@ class VoiceBot:
             ]
         )
         
-        # 2. Initialize Services
-        # Note: In a real app, pass API keys or clients here
+        # 2. Define Tool Schemas (The "What")
+        # We pass these to the LLM so it knows what tools exist.
+        self.tool_definitions = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "query_menu",
+                    "description": "Query the restaurant menu for items and prices",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "The customer's question about the menu"
+                            }
+                        },
+                        "required": ["question"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_reservation",
+                    "description": "Create a restaurant reservation",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "date": {"type": "string", "description": "YYYY-MM-DD"},
+                            "time": {"type": "string", "description": "HH:MM"},
+                            "party_size": {"type": "integer"},
+                            "customer_name": {"type": "string"},
+                            "customer_phone": {"type": "string"}
+                        },
+                        "required": ["date", "time", "party_size", "customer_name", "customer_phone"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "transfer_to_staff",
+                    "description": "Transfer to human staff",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "reason": {"type": "string"}
+                        },
+                        "required": ["reason"]
+                    }
+                }
+            }
+        ]
+        
+        # 3. Initialize Services with Tools
         self.stt = DeepgramSTTService(api_key=Config.DEEPGRAM_API_KEY, audio_passthrough=True)
         self.tts = ElevenLabsTTSService(api_key=Config.ELEVENLABS_API_KEY, voice_id=Config.ELEVENLABS_VOICE_ID)
-        self.llm = AnthropicLLMService(api_key=Config.ANTHROPIC_API_KEY, model=Config.ANTHROPIC_MODEL)
+        
+        # Pass the definitions here
+        self.llm = AnthropicLLMService(
+            api_key=Config.ANTHROPIC_API_KEY, 
+            model=Config.ANTHROPIC_MODEL,
+            tools=self.tool_definitions
+        )
 
-        # 3. Register Tools
-        self._register_tools()
+        # 4. Register Callbacks (The "How")
+        self._register_tool_handlers()
 
     def _create_system_prompt(self) -> str:
         return """You are a friendly and professional voice assistant for a restaurant reservation system. 
         Your role is to help customers make reservations, answer menu questions, and transfer to staff.
         Keep responses concise and conversational."""
 
-    def _register_tools(self):
-        """Register tools directly with the Pipecat LLM Service"""
+    def _register_tool_handlers(self):
+        """Bind Python functions to the tool names registered in the LLM Service"""
         
         # Tool: Query Menu
-        async def query_menu(question: str):
+        async def query_menu(function_name, tool_call_id, args, llm, context, result_callback):
+            # Note: Pipecat v0.3 callbacks receive specific arguments
+            question = args.get("question")
             results = self.menu_rag.query(question, n_results=3)
             if results:
                 formatted = "\n".join([f"- {r['name']}: {r['description']} (${r['price']:.2f})" for r in results])
-                return f"Here are some menu items:\n{formatted}"
-            return "I couldn't find any menu items matching that."
-
-        self.llm.register_function(
-            "query_menu",
-            query_menu,
-            description="Query the restaurant menu for items and prices",
-            properties={"question": {"type": "string"}}
-        )
+                await result_callback(f"Here are some menu items:\n{formatted}")
+            else:
+                await result_callback("I couldn't find any menu items matching that.")
 
         # Tool: Create Reservation
-        async def create_reservation(date: str, time: str, party_size: int, customer_name: str, customer_phone: str):
-            # Guardrails check
-            is_valid, error = self.guardrails.validate_reservation_info(locals())
+        async def create_reservation(function_name, tool_call_id, args, llm, context, result_callback):
+            # Validate
+            is_valid, error = self.guardrails.validate_reservation_info(args)
             if not is_valid:
-                return f"Issue with details: {error}"
-            
-            # Availability check
-            available = await self.calendar_adapter.check_availability(date, time, party_size)
+                await result_callback(f"Issue with details: {error}")
+                return
+
+            # Check Availability
+            available = await self.calendar_adapter.check_availability(
+                args["date"], args["time"], args["party_size"]
+            )
             if not available:
-                return "That time slot is not available."
+                await result_callback("That time slot is not available.")
+                return
 
-            # Booking
-            result = await self.calendar_adapter.create_reservation(locals())
+            # Book
+            result = await self.calendar_adapter.create_reservation(args)
             if "error" in result:
-                return f"Error creating reservation: {result['error']}"
-            return f"Reservation confirmed! Confirmation number: {result.get('reservation_id')}"
-
-        self.llm.register_function(
-            "create_reservation",
-            create_reservation,
-            description="Create a restaurant reservation",
-            properties={
-                "date": {"type": "string"},
-                "time": {"type": "string"},
-                "party_size": {"type": "integer"},
-                "customer_name": {"type": "string"},
-                "customer_phone": {"type": "string"}
-            }
-        )
+                await result_callback(f"Error creating reservation: {result['error']}")
+            else:
+                await result_callback(f"Reservation confirmed! Confirmation number: {result.get('reservation_id')}")
 
         # Tool: Transfer
-        async def transfer_to_staff(reason: str):
+        async def transfer_to_staff(function_name, tool_call_id, args, llm, context, result_callback):
+            reason = args.get("reason")
             request = TransferRequest(
                 call_sid=self.call_sid,
                 caller_id=self.caller_id,
@@ -149,39 +184,29 @@ class VoiceBot:
                 priority=TransferPriority.NORMAL
             )
             position = await self.transfer_queue.enqueue_transfer(request)
-            
-            # In a real Pipecat app, triggering a transfer usually involves 
-            # sending a specific frame or signal to the telephony provider.
-            # Here we return a message, but you might also emit a control frame.
-            return f"Transferring you now. Your position is {position}."
+            await result_callback(f"Transferring you now. Your position is {position}.")
 
-        self.llm.register_function(
-            "transfer_to_staff",
-            transfer_to_staff,
-            description="Transfer to human staff",
-            properties={"reason": {"type": "string"}}
-        )
+        # Register the handlers using the new method
+        self.llm.register_function("query_menu", query_menu)
+        self.llm.register_function("create_reservation", create_reservation)
+        self.llm.register_function("transfer_to_staff", transfer_to_staff)
 
     async def run(self):
         """Build and run the pipeline"""
         
-        # 4. Context Aggregators manage the chat history automatically
-        # They collect user speech -> add to context -> send to LLM
         user_context = LLMUserContextAggregator(self.context)
         assistant_context = LLMAssistantContextAggregator(self.context)
 
-        # 5. Define Pipeline Flow
         pipeline = Pipeline([
-            self.transport.input(),   # Audio from phone/web
-            self.stt,                 # Speech to Text
-            user_context,             # Add user text to LLM context
-            self.llm,                 # Generate response (and handle tools)
-            self.tts,                 # Text to Speech
-            self.transport.output(),  # Audio back to phone/web
-            assistant_context         # Add assistant response to LLM context
+            self.transport.input(),
+            self.stt,
+            user_context,
+            self.llm,
+            self.tts,
+            self.transport.output(),
+            assistant_context
         ])
 
-        # 6. Run the Task
         task = PipelineTask(pipeline)
         runner = PipelineRunner()
         
