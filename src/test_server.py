@@ -1,125 +1,84 @@
-import time
+# test_server.py
 import asyncio
 import aiohttp
-import os
+import time
+from loguru import logger
 
-# Pipecat Imports
+# Pipecat Transport & VAD
 from pipecat.transports.daily.transport import DailyTransport, DailyParams
 from pipecat.transports.daily.utils import (
     DailyRESTHelper, 
     DailyMeetingTokenParams, 
     DailyMeetingTokenProperties
 )
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+
+# Services
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
-# Your Custom Imports
+# Custom Imports
 from .config import Config
 from .bot.voice_bot import VoiceBot
-# Adapters (Custom adapters removed as they are replaced by Pipecat services in VoiceBot)
 from .adapters.calendar import GoogleCalendarAdapter
 from .rag.menu_rag import MenuRAG
 from .guardrails.safety import Guardrails
 from .transfer.queue import TransferQueue, StaffMember, StaffStatus
 
-async def wait_for_user(session, room_url, api_key):
-    """Polls the Daily API until a user joins the room."""
-    print(f"⏳ Waiting for users to join {room_url}...")
-    
-    # Extract room name from URL (e.g., https://domain.daily.co/room-name -> room-name)
-    room_name = room_url.split("/")[-1]
-    url = f"https://api.daily.co/v1/rooms/{room_name}/presence"
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    while True:
-        try:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    # data is a dict of participants e.g. { "session_id": {...}, ... }
-                    # If count > 0, someone is in the room
-                    if len(data) > 0:
-                        print(f"👤 User detected! (Count: {len(data)}) Launching bot...")
-                        return
-                else:
-                    # Ignore errors (room might not be active or other transient issues)
-                    pass
-        except Exception as e:
-            # Ignore network errors
-            pass
-        
-        await asyncio.sleep(2)  # Check every 2 seconds
-
 async def main():
-    print("🚀 Initializing Voice Bot (Daily.co Mode)...")
+    logger.info("🚀 Initializing Voice Bot (Modern Pipecat Stack)...")
 
     # Validate Config
     valid, errors = Config.validate()
     if not valid:
-        print("❌ Configuration Error:")
-        for error in errors:
-            print(f"  - {error}")
-        # Continue if only Daily is missing (since we might be just testing imports)
-        if not Config.DAILY_SAMPLE_ROOM_URL:
-             print("❌ Missing DAILY_SAMPLE_ROOM_URL in .env")
-             return
+        logger.error(f"Config Errors: {errors}")
+        return
 
-    # 1. Initialize RAG
+    # 1. Initialize Data Layers
     menu_rag = MenuRAG(Config.CHROMA_DB_PATH)
     try:
         menu_rag.load_from_file(Config.MENU_DATA_PATH)
-        print("✅ Menu RAG loaded")
+        logger.info("✅ Menu RAG loaded")
     except Exception:
-        print("⚠️ Menu data not found. RAG will be empty.")
+        logger.warning("⚠️ Menu data not found. RAG will be empty.")
 
-    # 2. Initialize Shared Logic
     guardrails = Guardrails()
     transfer_queue = TransferQueue()
-    
-    # 3. Add Dummy Staff
     transfer_queue.add_staff(StaffMember("staff_1", "Sarah", "+1234567890", StaffStatus.AVAILABLE))
-    
-    # 4. Configure Transport (Daily.co)
-    print(f"Connecting to Daily room: {Config.DAILY_SAMPLE_ROOM_URL}")
-    
-    # Token handlin
-    
+
+    # 2. Token Generation (Preserving your custom logic)
     async with aiohttp.ClientSession() as session:
         helper = DailyRESTHelper(
             daily_api_key=Config.DAILY_API_KEY,
             daily_api_url="https://api.daily.co/v1",
             aiohttp_session=session
         )
-
-        # Wait for user to join the room
-        await wait_for_user(session, Config.DAILY_SAMPLE_ROOM_URL, Config.DAILY_API_KEY)
-
-        # Calculate expiration (e.g., 1 hour from now)
-        # The guide recommends "exp" to secure the token
+        
+        # Note: We NO LONGER wait_for_user here. The Runner handles waiting.
+        
         expiration = int(time.time() + 3600)
-
-        # Create params matching the guide's "properties" object
-        # https://docs.daily.co/reference/rest-api/meeting-tokens/create-meeting-token
         params = DailyMeetingTokenParams(
             properties=DailyMeetingTokenProperties(
-                room_name="voice-bot-test", # Optional: limits token to specific room
-                is_owner=True,            # Grants admin privileges (broadcasting, etc.)
-                exp=expiration,           # Token expiry timestamp
+                room_name="voice-bot-test", 
+                is_owner=True,            
+                exp=expiration,          
                 user_name="Restaurant Bot",
             )
         )
 
         try:
-            # We pass the full params object instead of just the URL
             token = await helper.get_token(
                 room_url=Config.DAILY_SAMPLE_ROOM_URL, 
                 params=params
             )
-            print(f"✅ Generated Token: {token}")
+            logger.info(f"✅ Generated Token: {token}")
         except Exception as e:
-            print(f"⚠️ Failed to generate token: {e}")
-    
+            logger.error(f"Failed to generate token: {e}")
+            return
+
+        # 3. Configure Transport with Silero VAD (Crucial for good interruption)
         transport = DailyTransport(
             room_url=Config.DAILY_SAMPLE_ROOM_URL,
             token=token,
@@ -129,27 +88,26 @@ async def main():
                 audio_in_enabled=True,
                 camera_out_enabled=False,
                 transcription_enabled=False,
+                # Add VAD to filter background noise
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             )
         )
-        
-        calendar_adapter = GoogleCalendarAdapter(
-            credentials_path=Config.GOOGLE_CALENDAR_CREDENTIALS_PATH,
-            calendar_id=Config.GOOGLE_CALENDAR_ID
-        )
-        stt_service = DeepgramSTTService(api_key=Config.DEEPGRAM_API_KEY, audio_passthrough=True)
-        tts_service = ElevenLabsTTSService(api_key=Config.ELEVENLABS_API_KEY, voice_id=Config.ELEVENLABS_VOICE_ID)
-        llm_service = AnthropicLLMService(
-            api_key=Config.ANTHROPIC_API_KEY, 
-            model=Config.ANTHROPIC_MODEL,
-        )
 
-        # 6. Instantiate Bot
+        # 4. Initialize Services
+        stt = DeepgramSTTService(api_key=Config.DEEPGRAM_API_KEY)
+        tts = ElevenLabsTTSService(api_key=Config.ELEVENLABS_API_KEY, voice_id=Config.ELEVENLABS_VOICE_ID)
+        llm = AnthropicLLMService(api_key=Config.ANTHROPIC_API_KEY, model=Config.ANTHROPIC_MODEL)
+
+        # 5. Instantiate Bot
+        # We pass dependencies, but we don't pass transport yet
         bot = VoiceBot(
-            transport=transport,
-            stt_service=stt_service,
-            tts_service=tts_service,
-            llm_service=llm_service,
-            calendar_adapter=calendar_adapter,
+            stt_service=stt,
+            tts_service=tts,
+            llm_service=llm,
+            calendar_adapter=GoogleCalendarAdapter(
+                credentials_path=Config.GOOGLE_CALENDAR_CREDENTIALS_PATH,
+                calendar_id=Config.GOOGLE_CALENDAR_ID
+            ),
             menu_rag=menu_rag,
             guardrails=guardrails,
             transfer_queue=transfer_queue,
@@ -157,15 +115,12 @@ async def main():
             caller_id="daily_user"
         )
 
-        # 7. Run Pipeline
+        # 6. Run the Bot
+        # This will block until the session ends or Ctrl+C
         try:
-            await bot.run()
-        except KeyboardInterrupt:
-            print("Session ended by user")
+            await bot.run(transport, handle_sigint=True)
         except Exception as e:
-            print(f"Session ended with error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"Bot execution failed: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
