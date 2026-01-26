@@ -30,12 +30,5 @@ COPY . .
 # The server will handle missing menu data gracefully
 RUN uv run python scripts/init_menu_data.py || echo "Menu data initialization skipped or failed"
 
-# Expose the test server port
-EXPOSE 8001
-
-# Set environment variables for the test server
-ENV SERVER_HOST=0.0.0.0
-ENV SERVER_PORT=8001
-
 # Run the test server
-CMD ["uv", "run", "python", "test_main.py"]
+CMD ["uv", "run", "python", "-m", "src.test_server"]
