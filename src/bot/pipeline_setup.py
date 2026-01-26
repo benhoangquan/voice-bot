@@ -1,19 +1,11 @@
 """Pipecat pipeline setup with barge-in support"""
 
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMResponseAggregator
-from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.anthropic import AnthropicLLMService
-from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameProcessor
-from pipecat.frames.frames import TextFrame, TTSStartedFrame, TTSStoppedFrame
+from pipecat.frames.frames import TTSStartedFrame, TTSStoppedFrame
 
 from ..config import Config
-from .voice_bot import VoiceBot
-
 
 class BargeInProcessor(FrameProcessor):
     """Handle barge-in by detecting user speech during TTS"""
@@ -39,60 +31,28 @@ class BargeInProcessor(FrameProcessor):
 
 
 def create_pipeline(
-    voice_bot: VoiceBot,
-    audio_input,
-    audio_output
+    transport,
+    stt_service,
+    tts_service,
+    llm_service,
+    context_aggregator: LLMContextAggregatorPair
 ) -> Pipeline:
     """Create Pipecat pipeline with all processors"""
     
-    # Initialize services
-    stt_service = DeepgramSTTService(
-        api_key=Config.DEEPGRAM_API_KEY,
-        model="nova-2",
-        language="en-US",
-        interim_results=True,
-    )
-    
-    tts_service = ElevenLabsTTSService(
-        api_key=Config.ELEVENLABS_API_KEY,
-        voice_id=Config.ELEVENLABS_VOICE_ID,
-        model="eleven_turbo_v2_5",
-    )
-    
-    llm_service = AnthropicLLMService(
-        api_key=Config.ANTHROPIC_API_KEY,
-        model=Config.ANTHROPIC_MODEL,
-    )
-    
-    # VAD for barge-in detection
-    vad_analyzer = SileroVADAnalyzer()
-    
-    # Response aggregator
-    response_aggregator = LLMResponseAggregator()
-    
-    # Barge-in processor
-    barge_in_processor = BargeInProcessor(vad_analyzer)
+    # Get aggregators from the pair
+    user_aggregator = context_aggregator.user()
+    assistant_aggregator = context_aggregator.assistant()
     
     # Create pipeline
     pipeline = Pipeline([
-        audio_input,
-        vad_analyzer,
+        transport.input(),
         stt_service,
-        response_aggregator,
+        user_aggregator,
         llm_service,
-        barge_in_processor,
         tts_service,
-        audio_output,
+        transport.output(),
+        assistant_aggregator
     ])
     
     return pipeline
 
-
-async def run_bot(voice_bot: VoiceBot, audio_input, audio_output):
-    """Run the voice bot with Pipecat pipeline"""
-    pipeline = create_pipeline(voice_bot, audio_input, audio_output)
-    
-    task = PipelineTask(pipeline)
-    
-    runner = PipelineRunner()
-    await runner.run(task)

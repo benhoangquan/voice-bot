@@ -39,6 +39,11 @@ class Config:
     # VAD
     VAD_SENSITIVITY: float = float(os.getenv("VAD_SENSITIVITY", "0.5"))
     
+    # Daily
+    DAILY_SAMPLE_ROOM_URL: str = os.getenv("DAILY_SAMPLE_ROOM_URL", "")
+    DAILY_TOKEN: str = os.getenv("DAILY_TOKEN", "") # Token for joining the room (if private)
+    DAILY_API_KEY: str = os.getenv("DAILY_API_KEY", "") # Optional, if you want to generate tokens
+    
     # Server
     SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000"))
@@ -54,6 +59,7 @@ class Config:
             ("DEEPGRAM_API_KEY", cls.DEEPGRAM_API_KEY),
             ("ELEVENLABS_API_KEY", cls.ELEVENLABS_API_KEY),
             ("ANTHROPIC_API_KEY", cls.ANTHROPIC_API_KEY),
+            ("DAILY_SAMPLE_ROOM_URL", cls.DAILY_SAMPLE_ROOM_URL), 
         ]
         
         for var_name, var_value in required_vars:

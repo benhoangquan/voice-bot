@@ -5,7 +5,7 @@ description = "Voice telephone chatbot for restaurant reservations"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "pipecat-ai[local,deepgram,anthropic,elevenlabs]>=0.0.100",  # [local] includes PyAudio for microphone/speaker support
+    "pipecat-ai[daily,deepgram,anthropic,elevenlabs]>=0.0.100",  # [daily] includes Daily.co transport support
     "twilio>=9.0.0",
     "deepgram-sdk>=3.0.0",
     "anthropic>=0.40.0",
