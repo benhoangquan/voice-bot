@@ -1,161 +1,45 @@
 # Voice Restaurant Bot
 
-A real-time voice telephone chatbot system for restaurant reservations with menu queries, calendar booking, staff transfers, guardrails, and barge-in handling.
+A voice agent that answers restaurant questions, books tables and hands the call to staff. A browser caller speaks to it in real time over a Daily room.
 
-## Features
-
-- **Voice Telephone Interface**: Handle incoming calls via Twilio
-- **Real-time STT/TTS**: Streaming speech recognition and synthesis
-- **LLM with Tool Calling**: Intelligent conversation with function calling
-- **Menu RAG System**: Query menu items using vector search
-- **Reservation Booking**: Create reservations via Yelp API
-- **Queue-based Staff Transfer**: Transfer customers to human staff
-- **Guardrails**: Rate limiting, validation, and abuse detection
-- **Barge-in Support**: Handle interruptions gracefully
-- **Adapter Pattern**: Easy migration from APIs to open-source models
+![Voice conversation with the bot: menu question, reservation, staff handoff](docs/demo.gif)
 
 ## Architecture
 
-The system uses an adapter pattern architecture, allowing easy switching between:
-- **Telephony**: Twilio (current) → Asterisk (future)
-- **STT**: Deepgram (current) → Whisper (future)
-- **TTS**: ElevenLabs (current) → Qwen3-TTS (future)
-- **LLM**: Anthropic Claude (current) → Ollama (future)
-- **Calendar**: Yelp API (current) → Google Calendar (future)
+```
+caller ─▶ Daily transport ─▶ Silero VAD ─▶ Deepgram STT ─▶ Smart Turn v3 ─▶ Claude (Anthropic) ─▶ ElevenLabs TTS ─▶ caller
+                                                                                  │
+                                                         tool calls ──────────────┤
+                                  query_menu ─▶ MenuRAG (ChromaDB, all-MiniLM-L6-v2 embeddings)
+                                  create_reservation ─▶ Guardrails validation ─▶ Google Calendar availability + booking
+                                  transfer_to_staff ─▶ TransferQueue (priority queue, staff status)
+```
 
-## Setup
+One Pipecat pipeline (`src/bot/voice_bot.py`) runs the audio path. The model sees three tools. While a tool runs, the bot says "Let me check on that for you" to cover the wait. Smart Turn v3 decides when the caller has finished speaking, and Silero VAD handles interruptions.
 
-### 1. Install Dependencies
+| Path | Role |
+|---|---|
+| `src/bot/voice_bot.py` | Pipeline, tool schemas and tool handlers |
+| `src/test_server.py` | Entry point: joins a Daily room, runs the bot and restarts after each session |
+| `src/rag/menu_rag.py` | Menu embeddings in ChromaDB, top-3 semantic search |
+| `src/guardrails/safety.py` | Rate limit (10 calls per hour per caller), profanity filter, failed-attempt blocking and reservation field validation. The bot calls only the reservation validation today |
+| `src/transfer/queue.py` | Priority queue and staff availability for handoff |
+| `src/adapters/calendar.py` | `GoogleCalendarAdapter` (used) and `YelpAdapter` (not wired in) behind one `CalendarAdapter` interface |
+| `scripts/` | Menu data loader and component tests |
+
+## Results
+
+No latency or booking-accuracy benchmarks are recorded yet. What is checked today: `scripts/test_components.py` covers the guardrails (rate limit, profanity, reservation validation), the transfer queue (enqueue, dequeue, staff assignment) and menu search. The guardrail and queue tests pass. The menu-search test needs `chromadb` and `sentence-transformers` installed.
+
+## Quickstart
+
+Requires Python 3.13, [uv](https://docs.astral.sh/uv/), and accounts for Deepgram, ElevenLabs, Anthropic, Daily and Google Calendar.
 
 ```bash
 uv sync
-```
-
-### 2. Configure Environment
-
-Copy `.env.example` to `.env` and fill in your API keys:
-
-```bash
-cp .env.example .env
-```
-
-Required API keys:
-- Twilio (Account SID, Auth Token, Phone Number)
-- Deepgram (for STT)
-- ElevenLabs (for TTS)
-- Anthropic (for LLM)
-- Google Calendar (Service Account credentials or OAuth token)
-
-### 3. Initialize Menu Data
-
-```bash
+cp .env.example .env            # add API keys and the Daily room URL
 python scripts/init_menu_data.py
+uv run python -m src.test_server
 ```
 
-This creates sample menu data and loads it into the RAG database.
-
-### 4. Run the Server
-
-**Production Server (with Twilio):**
-```bash
-python main.py
-```
-The server will start on `http://0.0.0.0:8000`
-
-**Test Server (without Twilio):**
-```bash
-python test_main.py
-```
-The test server will start on `http://0.0.0.0:8001` with a web interface for testing.
-
-### 5. Configure Twilio Webhook (Production Only)
-
-In your Twilio console, set the webhook URL for incoming calls to:
-```
-https://your-domain.com/voice/incoming
-```
-
-## Project Structure
-
-```
-voice_bot/
-├── src/
-│   ├── adapters/          # Adapter interfaces and implementations
-│   │   ├── base.py        # Base adapter interfaces
-│   │   ├── telephony.py   # Twilio/Asterisk adapters
-│   │   ├── stt.py         # Deepgram/Whisper adapters
-│   │   ├── tts.py         # ElevenLabs/Qwen3-TTS adapters
-│   │   ├── llm.py         # Anthropic/Ollama adapters
-│   │   └── calendar.py    # Google Calendar adapter
-│   ├── bot/               # Main bot application
-│   │   ├── voice_bot.py   # Core bot logic
-│   │   └── pipeline_setup.py  # Pipecat pipeline configuration
-│   ├── rag/               # RAG system for menu queries
-│   │   └── menu_rag.py    # Menu vector database
-│   ├── guardrails/        # Safety and abuse prevention
-│   │   └── safety.py      # Rate limiting, validation
-│   ├── transfer/          # Staff transfer system
-│   │   └── queue.py       # Queue-based transfer
-│   ├── config.py          # Configuration management
-│   └── server.py          # FastAPI web server
-├── data/
-│   └── sample_menu.json   # Sample menu data
-├── scripts/
-│   └── init_menu_data.py  # Initialize menu RAG
-├── main.py                # Entry point
-└── pyproject.toml         # Dependencies
-```
-
-## Usage
-
-### Making a Call
-
-When a customer calls your Twilio number:
-1. The bot greets them
-2. They can ask about the menu
-3. They can make a reservation
-4. They can request to speak with staff
-
-### Menu Queries
-
-Customers can ask questions like:
-- "What vegetarian options do you have?"
-- "What's the price of the salmon?"
-- "Do you have gluten-free dishes?"
-
-### Reservations
-
-The bot collects:
-- Date and time
-- Party size
-- Customer name and phone
-- Special requests
-
-### Staff Transfer
-
-If a customer requests help or the bot can't assist:
-- Request is added to queue
-- Available staff member is assigned
-- Call is transferred with context
-
-## Development
-
-### Adding New Adapters
-
-1. Create a new class inheriting from the base adapter interface
-2. Implement all abstract methods
-3. Update configuration to select the adapter
-
-### Testing
-
-```bash
-# Test menu RAG
-python scripts/init_menu_data.py
-
-# Run server in development
-python main.py
-```
-
-## License
-
-MIT
+Then join the Daily room from a browser and start talking. `docs/google_calendar_setup.md` covers the calendar credentials. A `Dockerfile` runs the same entry point.

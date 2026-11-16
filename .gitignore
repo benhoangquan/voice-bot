@@ -52,3 +52,5 @@ Thumbs.db
 # Project specific
 data/*.json
 !data/sample_menu.json
+.DS_Store
+chroma_db/

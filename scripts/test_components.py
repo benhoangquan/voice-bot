@@ -56,8 +56,8 @@ def test_guardrails():
             assert not allowed, f"Should block call {i+1}"
     
     # Test profanity filter
-    assert guardrails.check_profanity("This is a test"), False
-    assert guardrails.check_profanity("This is shit"), True
+    assert not guardrails.check_profanity("This is a test")
+    assert guardrails.check_profanity("This is shit")
     
     # Test reservation validation
     valid_info = {

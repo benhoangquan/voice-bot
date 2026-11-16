@@ -10,11 +10,6 @@ load_dotenv()
 class Config:
     """Application configuration"""
     
-    # Telephony
-    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
-    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
-    TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "")
-    
     # STT
     DEEPGRAM_API_KEY: str = os.getenv("DEEPGRAM_API_KEY", "")
     
@@ -54,12 +49,11 @@ class Config:
         errors = []
         
         required_vars = [
-            ("TWILIO_ACCOUNT_SID", cls.TWILIO_ACCOUNT_SID),
-            ("TWILIO_AUTH_TOKEN", cls.TWILIO_AUTH_TOKEN),
             ("DEEPGRAM_API_KEY", cls.DEEPGRAM_API_KEY),
             ("ELEVENLABS_API_KEY", cls.ELEVENLABS_API_KEY),
             ("ANTHROPIC_API_KEY", cls.ANTHROPIC_API_KEY),
-            ("DAILY_SAMPLE_ROOM_URL", cls.DAILY_SAMPLE_ROOM_URL), 
+            ("DAILY_SAMPLE_ROOM_URL", cls.DAILY_SAMPLE_ROOM_URL),
+            ("DAILY_API_KEY", cls.DAILY_API_KEY),
         ]
         
         for var_name, var_value in required_vars:
