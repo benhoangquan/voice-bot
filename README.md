@@ -2,7 +2,7 @@
 
 A voice agent that answers restaurant questions, books tables and hands the call to staff. A browser caller speaks to it in real time over a Daily room.
 
-![Voice conversation with the bot: menu question, reservation, staff handoff](docs/demo.gif)
+<!-- demo: add docs/demo.gif and an image link here once the recording exists -->
 
 ## Architecture
 
